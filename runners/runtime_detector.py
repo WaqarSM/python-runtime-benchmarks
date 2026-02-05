@@ -5,22 +5,31 @@ Detect and validate available Python runtimes.
 import subprocess
 import shutil
 import sys
+import os
 from typing import Dict, List, Optional
 
 
 class RuntimeInfo:
     """Information about a Python runtime."""
 
-    def __init__(self, name: str, executable: str, version: str, available: bool):
+    def __init__(self, name: str, executable: str, version: str, available: bool, numpy_version: str = None, scipy_version: str = None):
         self.name = name
         self.executable = executable
         self.version = version
         self.available = available
+        self.numpy_version = numpy_version
+        self.scipy_version = scipy_version
 
     def __repr__(self):
         status = "available" if self.available else "not available"
         if self.available:
-            return f"{self.name} ({self.version}) - {status}"
+            libs = []
+            if self.numpy_version:
+                libs.append(f"numpy={self.numpy_version}")
+            if self.scipy_version:
+                libs.append(f"scipy={self.scipy_version}")
+            lib_str = f" [{', '.join(libs)}]" if libs else ""
+            return f"{self.name} ({self.version}) - {status}{lib_str}"
         return f"{self.name} - {status}"
 
 
@@ -38,6 +47,34 @@ def get_runtime_version(executable: str) -> Optional[str]:
         return version_output.strip()
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
         return None
+
+
+def get_library_versions(executable: str) -> tuple[Optional[str], Optional[str]]:
+    """Check for numpy and scipy versions."""
+    numpy_ver = None
+    scipy_ver = None
+    
+    # Check numpy
+    try:
+        res = subprocess.run(
+            [executable, "-c", "import numpy; print(numpy.__version__)"],
+            capture_output=True, text=True, timeout=5
+        )
+        if res.returncode == 0:
+            numpy_ver = res.stdout.strip()
+    except: pass
+    
+    # Check scipy
+    try:
+        res = subprocess.run(
+            [executable, "-c", "import scipy; print(scipy.__version__)"],
+            capture_output=True, text=True, timeout=5
+        )
+        if res.returncode == 0:
+            scipy_ver = res.stdout.strip()
+    except: pass
+    
+    return numpy_ver, scipy_ver
 
 
 def check_uv_runtime() -> tuple[Optional[str], Optional[str]]:
@@ -75,46 +112,65 @@ def check_uv_runtime() -> tuple[Optional[str], Optional[str]]:
 def detect_runtimes() -> Dict[str, RuntimeInfo]:
     """Detect all available Python runtimes."""
     runtimes = {}
+    cwd = os.getcwd()
 
-    # Check CPython (standard python3)
-    python3_path = shutil.which("python3")
-    if python3_path:
-        version = get_runtime_version(python3_path)
+    # Check CPython (prefer .venv)
+    venv_python = os.path.join(cwd, ".venv", "bin", "python")
+    if os.path.exists(venv_python):
+        executable = venv_python
+    else:
+        executable = shutil.which("python3")
+
+    if executable:
+        version = get_runtime_version(executable)
+        np_ver, sp_ver = get_library_versions(executable) if version else (None, None)
         runtimes['python3'] = RuntimeInfo(
             name='CPython',
-            executable=python3_path,
+            executable=executable,
             version=version or "unknown",
-            available=version is not None
+            available=version is not None,
+            numpy_version=np_ver,
+            scipy_version=sp_ver
         )
     else:
         runtimes['python3'] = RuntimeInfo(
-            name='CPython',
-            executable='python3',
-            version='',
-            available=False
+            name='CPython', executable='python3', version='', available=False
         )
 
-    # Check PyPy
-    pypy3_path = shutil.which("pypy3")
-    if pypy3_path:
-        version = get_runtime_version(pypy3_path)
+    # Check PyPy (prefer .venv-pypy)
+    venv_pypy = os.path.join(cwd, ".venv-pypy", "bin", "pypy3")
+    # Fallback to bin/python if pypy3 doesn't exist in venv (sometimes it's just python)
+    if not os.path.exists(venv_pypy):
+         venv_pypy_alt = os.path.join(cwd, ".venv-pypy", "bin", "python")
+         if os.path.exists(venv_pypy_alt):
+             venv_pypy = venv_pypy_alt
+
+    if os.path.exists(venv_pypy):
+        executable = venv_pypy
+    else:
+        executable = shutil.which("pypy3")
+
+    if executable:
+        version = get_runtime_version(executable)
+        np_ver, sp_ver = get_library_versions(executable) if version else (None, None)
         runtimes['pypy'] = RuntimeInfo(
             name='PyPy',
-            executable=pypy3_path,
+            executable=executable,
             version=version or "unknown",
-            available=version is not None
+            available=version is not None,
+            numpy_version=np_ver,
+            scipy_version=sp_ver
         )
     else:
         runtimes['pypy'] = RuntimeInfo(
-            name='PyPy',
-            executable='pypy3',
-            version='',
-            available=False
+            name='PyPy', executable='pypy3', version='', available=False
         )
 
     # Check uv
     uv_path, uv_version = check_uv_runtime()
     if uv_path and uv_version:
+        # UV just runs python, so checking its libs is tricky without a specific project context context, 
+        # but the request was specifically for the runtimes.
         runtimes['uv'] = RuntimeInfo(
             name='UV',
             executable=uv_path,
@@ -123,41 +179,31 @@ def detect_runtimes() -> Dict[str, RuntimeInfo]:
         )
     else:
         runtimes['uv'] = RuntimeInfo(
-            name='UV',
-            executable='uv',
-            version='',
-            available=False
+            name='UV', executable='uv', version='', available=False
         )
 
     return runtimes
 
 
-def get_runtime_command(runtime_name: str, script_path: str) -> List[str]:
+def get_runtime_command(runtime_name: str, script_path: str, executable: str = None) -> List[str]:
     """Get the command to execute a script with the given runtime."""
     # #region agent log
     log_path = "/Users/waqarm/Projects/python-runtime-benchmark/.cursor/debug.log"
     try:
         import json, os, time
         with open(log_path, "a") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "A", "location": "runtime_detector.py:137", "message": "get_runtime_command called", "data": {"runtime_name": runtime_name, "script_path": script_path, "cwd": os.getcwd()}, "timestamp": int(time.time() * 1000)}) + "\n")
+            f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "A", "location": "runtime_detector.py:137", "message": "get_runtime_command called", "data": {"runtime_name": runtime_name, "script_path": script_path, "executable": executable, "cwd": os.getcwd()}, "timestamp": int(time.time() * 1000)}) + "\n")
     except: pass
     # #endregion agent log
     
     if runtime_name == 'uv':
         # Use --no-project to skip building the project as a package
         cmd = ['uv', 'run', '--no-project', 'python', script_path]
-        # #region agent log
-        try:
-            import json, time
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "A", "location": "runtime_detector.py:143", "message": "uv command constructed with --no-project", "data": {"command": cmd}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except: pass
-        # #endregion agent log
         return cmd
-    elif runtime_name == 'pypy':
-        return ['pypy3', script_path]
-    else:  # python3
-        return ['python3', script_path]
+    
+    # For others, use the provided executable (from venv) or fall back to defaults
+    exe = executable or ('pypy3' if runtime_name == 'pypy' else 'python3')
+    return [exe, script_path]
 
 
 def print_runtime_summary(runtimes: Dict[str, RuntimeInfo]):

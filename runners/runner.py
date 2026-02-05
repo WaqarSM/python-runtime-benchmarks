@@ -65,7 +65,7 @@ class BenchmarkRunner:
         """Measure startup time and import overhead for a runtime."""
         print(f"\n  Measuring {runtime_name} overhead...")
 
-        cmd = get_runtime_command(runtime_name, "dummy.py")
+        cmd = get_runtime_command(runtime_name, "dummy.py", runtime_info.executable)
         results = {}
 
         # Measure startup time (multiple runs for accuracy)
@@ -123,7 +123,7 @@ class BenchmarkRunner:
         # Ensure benchmark_path is absolute for subprocess execution
         benchmark_path = os.path.abspath(benchmark_path)
 
-        cmd = get_runtime_command(runtime_name, benchmark_path)
+        cmd = get_runtime_command(runtime_name, benchmark_path, runtime_info.executable)
 
         # Run the benchmark with multiple trials
         trial_results = run_multiple_trials(

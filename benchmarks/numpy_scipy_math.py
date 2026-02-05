@@ -19,16 +19,12 @@ try:
     from scipy import fft, linalg, optimize, integrate, signal
     SCIPY_AVAILABLE = True
 except ImportError as e:
-    print(f"WARNING: NumPy/SciPy not available: {e}", flush=True)
-    SCIPY_AVAILABLE = False
+    print(f"ERROR: NumPy/SciPy not available: {e}", flush=True)
+    sys.exit(1)
 
 
 def run_benchmark():
     """Run all NumPy/SciPy benchmarks."""
-    if not SCIPY_AVAILABLE:
-        print("Skipping NumPy/SciPy benchmarks - libraries not available", flush=True)
-        return {'skipped': 0.0}
-
     results = {}
 
     # Benchmark 1: Large matrix operations

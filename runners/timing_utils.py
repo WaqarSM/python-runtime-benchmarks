@@ -260,7 +260,7 @@ if __name__ == "__main__":
             print(f"Testing {name}:")
 
             # Test startup time
-            cmd = get_runtime_command(name, "dummy.py")
+            cmd = get_runtime_command(name, "dummy.py", info.executable)
             startup = measure_startup_time(cmd[:-1] + ['-c', 'pass'])
             print(f"  Startup time: {startup:.6f}s")
 

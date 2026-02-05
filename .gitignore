@@ -25,6 +25,7 @@ venv/
 env/
 ENV/
 .venv
+.venv-pypy
 
 # Test data (5GB files)
 test_data/*.bin
